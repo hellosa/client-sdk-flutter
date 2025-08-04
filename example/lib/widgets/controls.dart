@@ -66,6 +66,31 @@ class _ControlsWidgetState extends State<ControlsWidget> {
   // Frame rate control
   int _selectedFrameRate = 30;
   final List<int> _frameRateOptions = [15, 24, 30, 60];
+  
+  // Simulcast control
+  bool _simulcastEnabled = true;
+  String _selectedSimulcastLayers = 'Auto';
+  final Map<String, List<VideoParameters>?> _simulcastOptions = {
+    'Disabled': null,
+    'Auto': [], // Use default layers
+    'Low+Medium': [
+      VideoParametersPresets.h360_169,
+      VideoParametersPresets.h540_169,
+    ],
+    'Medium+High': [
+      VideoParametersPresets.h540_169,
+      VideoParametersPresets.h720_169,
+    ],
+    'All Layers': [
+      VideoParametersPresets.h360_169,
+      VideoParametersPresets.h540_169,
+      VideoParametersPresets.h720_169,
+    ],
+  };
+  
+  // Codec control
+  String _selectedCodec = 'H.264';
+  final List<String> _codecOptions = ['H.264', 'VP8', 'VP9', 'AV1'];
 
   @override
   void initState() {
@@ -354,6 +379,53 @@ class _ControlsWidgetState extends State<ControlsWidget> {
     }
   }
 
+  void _changeSimulcastLayers(String layerOption) async {
+    if (_selectedSimulcastLayers == layerOption) return;
+    
+    setState(() {
+      _selectedSimulcastLayers = layerOption;
+      _simulcastEnabled = layerOption != 'Disabled';
+    });
+    
+    final videoTrack = participant.videoTrackPublications.firstOrNull?.track as LocalVideoTrack?;
+    if (videoTrack != null) {
+      try {
+        // Stop current track
+        await videoTrack.stop();
+        
+        // Create new track with new simulcast settings
+        final dimensions = _resolutionOptions[_selectedResolution]!;
+        final simulcastLayers = _simulcastOptions[layerOption];
+        
+        final newTrack = await LocalVideoTrack.createCameraTrack(
+          CameraCaptureOptions(
+            params: VideoParameters(
+              dimensions: dimensions,
+              encoding: VideoEncoding(
+                maxBitrate: (_videoBitrate * 1000).round(),
+                maxFramerate: _selectedFrameRate,
+              ),
+            ),
+          ),
+        );
+        
+        // Replace the track with simulcast options
+        await participant.publishVideoTrack(
+          newTrack,
+          publishOptions: VideoPublishOptions(
+            simulcast: _simulcastEnabled,
+            videoSimulcastLayers: simulcastLayers ?? [],
+            videoCodec: _codecToApiString(_selectedCodec),
+          ),
+        );
+        
+        print('Simulcast layers changed to: $layerOption (enabled: $_simulcastEnabled)');
+      } catch (e) {
+        print('Failed to change simulcast layers: $e');
+      }
+    }
+  }
+
   void _changeResolution(String resolution) async {
     if (_selectedResolution == resolution) return;
     
@@ -381,8 +453,16 @@ class _ControlsWidgetState extends State<ControlsWidget> {
           ),
         );
         
-        // Replace the track
-        await participant.publishVideoTrack(newTrack);
+        // Replace the track with current simulcast settings
+        final simulcastLayers = _simulcastOptions[_selectedSimulcastLayers];
+        await participant.publishVideoTrack(
+          newTrack,
+          publishOptions: VideoPublishOptions(
+            simulcast: _simulcastEnabled,
+            videoSimulcastLayers: simulcastLayers ?? [],
+            videoCodec: _codecToApiString(_selectedCodec),
+          ),
+        );
         print('Resolution changed to: $resolution (${dimensions.width}x${dimensions.height})');
       } catch (e) {
         print('Failed to change resolution: $e');
@@ -417,12 +497,79 @@ class _ControlsWidgetState extends State<ControlsWidget> {
           ),
         );
         
-        // Replace the track
-        await participant.publishVideoTrack(newTrack);
+        // Replace the track with current simulcast settings
+        final simulcastLayers = _simulcastOptions[_selectedSimulcastLayers];
+        await participant.publishVideoTrack(
+          newTrack,
+          publishOptions: VideoPublishOptions(
+            simulcast: _simulcastEnabled,
+            videoSimulcastLayers: simulcastLayers ?? [],
+            videoCodec: _codecToApiString(_selectedCodec),
+          ),
+        );
         print('Frame rate changed to: ${frameRate} fps');
       } catch (e) {
         print('Failed to change frame rate: $e');
       }
+    }
+  }
+
+  void _changeCodec(String codec) async {
+    if (_selectedCodec == codec) return;
+    
+    setState(() {
+      _selectedCodec = codec;
+    });
+    
+    final videoTrack = participant.videoTrackPublications.firstOrNull?.track as LocalVideoTrack?;
+    if (videoTrack != null) {
+      try {
+        // Stop current track
+        await videoTrack.stop();
+        
+        // Create new track with new codec
+        final dimensions = _resolutionOptions[_selectedResolution]!;
+        final newTrack = await LocalVideoTrack.createCameraTrack(
+          CameraCaptureOptions(
+            params: VideoParameters(
+              dimensions: dimensions,
+              encoding: VideoEncoding(
+                maxBitrate: (_videoBitrate * 1000).round(),
+                maxFramerate: _selectedFrameRate,
+              ),
+            ),
+          ),
+        );
+        
+        // Replace the track with new codec and current settings
+        final simulcastLayers = _simulcastOptions[_selectedSimulcastLayers];
+        await participant.publishVideoTrack(
+          newTrack,
+          publishOptions: VideoPublishOptions(
+            simulcast: _simulcastEnabled,
+            videoSimulcastLayers: simulcastLayers ?? [],
+            videoCodec: _codecToApiString(codec),
+          ),
+        );
+        print('Codec changed to: $codec');
+      } catch (e) {
+        print('Failed to change codec: $e');
+      }
+    }
+  }
+  
+  String _codecToApiString(String displayCodec) {
+    switch (displayCodec) {
+      case 'H.264':
+        return 'h264';
+      case 'VP8':
+        return 'vp8';
+      case 'VP9':
+        return 'vp9';
+      case 'AV1':
+        return 'av01';
+      default:
+        return 'h264';
     }
   }
 
@@ -779,6 +926,113 @@ class _ControlsWidgetState extends State<ControlsWidget> {
                     onChanged: (int? newValue) {
                       if (newValue != null) {
                         _changeFrameRate(newValue);
+                      }
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Simulcast layers selector
+              Text(
+                'Simulcast Layers',
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.grey),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedSimulcastLayers,
+                    dropdownColor: Colors.black87,
+                    style: const TextStyle(color: Colors.white),
+                    items: _simulcastOptions.keys.map((String option) {
+                      String description = '';
+                      switch (option) {
+                        case 'Disabled':
+                          description = 'Single stream only';
+                          break;
+                        case 'Auto':
+                          description = 'Default layers';
+                          break;
+                        case 'Low+Medium':
+                          description = '360p + 540p';
+                          break;
+                        case 'Medium+High':
+                          description = '540p + 720p';
+                          break;
+                        case 'All Layers':
+                          description = '360p + 540p + 720p';
+                          break;
+                      }
+                      return DropdownMenuItem<String>(
+                        value: option,
+                        child: Text(
+                          '$option ($description)',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (String? newValue) {
+                      if (newValue != null) {
+                        _changeSimulcastLayers(newValue);
+                      }
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Video codec selector
+              Text(
+                'Video Codec',
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.grey),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedCodec,
+                    dropdownColor: Colors.black87,
+                    style: const TextStyle(color: Colors.white),
+                    items: _codecOptions.map((String codec) {
+                      String description = '';
+                      switch (codec) {
+                        case 'H.264':
+                          description = 'AVC - Best compatibility';
+                          break;
+                        case 'VP8':
+                          description = 'Open source';
+                          break;
+                        case 'VP9':
+                          description = 'Better compression';
+                          break;
+                        case 'AV1':
+                          description = 'Latest, best quality';
+                          break;
+                      }
+                      return DropdownMenuItem<String>(
+                        value: codec,
+                        child: Text(
+                          '$codec ($description)',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (String? newValue) {
+                      if (newValue != null) {
+                        _changeCodec(newValue);
                       }
                     },
                   ),
