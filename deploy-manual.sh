@@ -22,7 +22,12 @@ fi
 
 # 复制构建文件
 echo "📁 复制构建文件..."
-cp -r example/build/web/* .
+if [ -d "example/build/web" ]; then
+    cp -r example/build/web/* .
+else
+    echo "❌ 构建目录不存在，请先构建应用"
+    exit 1
+fi
 
 # 提交并推送
 echo "📤 提交并推送到 GitHub..."
