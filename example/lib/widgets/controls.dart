@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
@@ -91,6 +92,15 @@ class _ControlsWidgetState extends State<ControlsWidget> {
   // Codec control
   String _selectedCodec = 'H.264';
   final List<String> _codecOptions = ['H.264', 'VP8', 'VP9', 'AV1'];
+  
+  // Network status control
+  String _networkStatus = 'Unknown';
+  double _networkQuality = 0.0; // 0.0 to 1.0
+  bool _adaptiveStream = true;
+  double _currentBandwidth = 0.0; // in kbps
+  int _packetsLost = 0;
+  double _rtt = 0.0; // Round trip time in ms
+  bool _showNetworkStats = false;
 
   @override
   void initState() {
@@ -101,6 +111,9 @@ class _ControlsWidgetState extends State<ControlsWidget> {
       _loadDevices(devices);
     });
     Hardware.instance.enumerateDevices().then(_loadDevices);
+    
+    // Start network monitoring
+    _startNetworkMonitoring();
   }
 
   @override
@@ -572,6 +585,106 @@ class _ControlsWidgetState extends State<ControlsWidget> {
         return 'h264';
     }
   }
+  
+  void _startNetworkMonitoring() {
+    // Start periodic network monitoring
+    Timer.periodic(const Duration(seconds: 2), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      _updateNetworkStats();
+    });
+  }
+  
+  void _updateNetworkStats() async {
+    try {
+      final videoTrack = participant.videoTrackPublications.firstOrNull?.track as LocalVideoTrack?;
+      if (videoTrack != null) {
+        final stats = await videoTrack.getSenderStats();
+        if (stats.isNotEmpty) {
+          final latestStat = stats.first;
+          
+          setState(() {
+            _packetsLost = latestStat.packetsLost?.toInt() ?? 0;
+            _rtt = (latestStat.roundTripTime ?? 0.0) * 1000; // Convert to ms
+            _currentBandwidth = videoTrack.currentBitrate?.toDouble() ?? 0.0;
+            
+            // Calculate network quality based on RTT and packet loss
+            _networkQuality = _calculateNetworkQuality(_rtt, _packetsLost);
+            _networkStatus = _getNetworkStatusString(_networkQuality);
+          });
+          
+          // Auto-adjust quality if adaptive streaming is enabled
+          if (_adaptiveStream) {
+            _adjustQualityBasedOnNetwork();
+          }
+        }
+      }
+    } catch (e) {
+      print('Failed to update network stats: $e');
+    }
+  }
+  
+  double _calculateNetworkQuality(double rtt, int packetsLost) {
+    // Simple network quality calculation
+    // Good network: RTT < 50ms, no packet loss = 1.0
+    // Poor network: RTT > 300ms, high packet loss = 0.0
+    
+    double rttScore = 1.0;
+    if (rtt > 50) {
+      rttScore = math.max(0.0, 1.0 - (rtt - 50) / 250); // Linear decay from 50ms to 300ms
+    }
+    
+    double lossScore = math.max(0.0, 1.0 - (packetsLost / 100.0)); // Penalty for packet loss
+    
+    return (rttScore + lossScore) / 2.0;
+  }
+  
+  String _getNetworkStatusString(double quality) {
+    if (quality >= 0.8) return 'Excellent';
+    if (quality >= 0.6) return 'Good';
+    if (quality >= 0.4) return 'Fair';
+    if (quality >= 0.2) return 'Poor';
+    return 'Very Poor';
+  }
+  
+  void _adjustQualityBasedOnNetwork() {
+    if (!_adaptiveStream) return;
+    
+    // Auto-adjust resolution and bitrate based on network quality
+    if (_networkQuality < 0.3 && _selectedResolution != '360p') {
+      // Very poor network - drop to 360p
+      _changeResolution('360p');
+    } else if (_networkQuality < 0.5 && _selectedResolution == '1080p') {
+      // Poor network - drop from 1080p to 720p
+      _changeResolution('720p');
+    } else if (_networkQuality > 0.8 && _selectedResolution == '360p') {
+      // Excellent network - upgrade from 360p to 720p
+      _changeResolution('720p');
+    }
+    
+    // Adjust frame rate based on network quality
+    if (_networkQuality < 0.4 && _selectedFrameRate > 15) {
+      _changeFrameRate(15);
+    } else if (_networkQuality > 0.7 && _selectedFrameRate < 30) {
+      _changeFrameRate(30);
+    }
+  }
+  
+  void _toggleAdaptiveStream() {
+    setState(() {
+      _adaptiveStream = !_adaptiveStream;
+    });
+    print('Adaptive streaming ${_adaptiveStream ? 'enabled' : 'disabled'}');
+  }
+  
+  Color _getNetworkStatusColor() {
+    if (_networkQuality >= 0.8) return Colors.green;
+    if (_networkQuality >= 0.6) return Colors.yellow;
+    if (_networkQuality >= 0.4) return Colors.orange;
+    return Colors.red;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -781,6 +894,14 @@ class _ControlsWidgetState extends State<ControlsWidget> {
             onPressed: () => setState(() => _showBitrateControls = !_showBitrateControls),
             icon: Icon(Icons.tune, color: _showBitrateControls ? Colors.blue : null),
             tooltip: 'Bitrate Controls',
+          ),
+          IconButton(
+            onPressed: () => setState(() => _showNetworkStats = !_showNetworkStats),
+            icon: Icon(
+              Icons.network_check,
+              color: _showNetworkStats ? Colors.blue : _getNetworkStatusColor(),
+            ),
+            tooltip: 'Network Status: $_networkStatus',
           ),
         ],
       ),
@@ -1038,6 +1159,137 @@ class _ControlsWidgetState extends State<ControlsWidget> {
                   ),
                 ),
               ),
+            ],
+          ),
+        ),
+      ],
+      // Network status panel
+      if (_showNetworkStats) ...[
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.network_check,
+                    color: _getNetworkStatusColor(),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Network Status',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              // Network quality indicator
+              Text(
+                'Quality: $_networkStatus',
+                style: TextStyle(
+                  color: _getNetworkStatusColor(),
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              // Quality bar
+              Container(
+                height: 8,
+                decoration: BoxDecoration(
+                  color: Colors.grey.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: _networkQuality.clamp(0.0, 1.0),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: _getNetworkStatusColor(),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Network statistics
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Bandwidth',
+                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                      Text(
+                        '${(_currentBandwidth / 1000).toStringAsFixed(1)} Mbps',
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'RTT',
+                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                      Text(
+                        '${_rtt.toStringAsFixed(0)} ms',
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Packet Loss',
+                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                      Text(
+                        '$_packetsLost',
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              // Adaptive streaming toggle
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Adaptive Streaming',
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                  ),
+                  Switch(
+                    value: _adaptiveStream,
+                    onChanged: (value) => _toggleAdaptiveStream(),
+                    activeColor: Colors.blue,
+                  ),
+                ],
+              ),
+              if (_adaptiveStream) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Quality automatically adjusts based on network conditions',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ],
             ],
           ),
         ),
