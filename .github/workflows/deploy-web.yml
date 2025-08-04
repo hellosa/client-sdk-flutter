@@ -2,7 +2,10 @@ name: 🚀 Deploy LiveKit Flutter Web to GitHub Pages
 
 on:
   push:
-    branches: [ web-deploy ]
+    branches: [ main ]
+    paths:
+      - 'example/**'
+      - '.github/workflows/deploy-web.yml'
   workflow_dispatch:
 
 permissions:
