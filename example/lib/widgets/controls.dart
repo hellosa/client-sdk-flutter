@@ -51,6 +51,10 @@ class _ControlsWidgetState extends State<ControlsWidget> {
     '1080p': VideoDimensionsPresets.h1080_169,
     '1440p': VideoDimensionsPresets.h1440_169,
   };
+  
+  // Frame rate control
+  int _selectedFrameRate = 30;
+  final List<int> _frameRateOptions = [15, 24, 30, 60];
 
   @override
   void initState() {
@@ -331,7 +335,7 @@ class _ControlsWidgetState extends State<ControlsWidget> {
               dimensions: dimensions,
               encoding: VideoEncoding(
                 maxBitrate: (_videoBitrate * 1000).round(),
-                maxFramerate: 30,
+                maxFramerate: _selectedFrameRate,
               ),
             ),
           ),
@@ -342,6 +346,42 @@ class _ControlsWidgetState extends State<ControlsWidget> {
         print('Resolution changed to: $resolution (${dimensions.width}x${dimensions.height})');
       } catch (e) {
         print('Failed to change resolution: $e');
+      }
+    }
+  }
+
+  void _changeFrameRate(int frameRate) async {
+    if (_selectedFrameRate == frameRate) return;
+    
+    setState(() {
+      _selectedFrameRate = frameRate;
+    });
+    
+    final videoTrack = participant.videoTrackPublications.firstOrNull?.track as LocalVideoTrack?;
+    if (videoTrack != null) {
+      try {
+        // Stop current track
+        await videoTrack.stop();
+        
+        // Create new track with new frame rate
+        final dimensions = _resolutionOptions[_selectedResolution]!;
+        final newTrack = await LocalVideoTrack.createCameraTrack(
+          CameraCaptureOptions(
+            params: VideoParameters(
+              dimensions: dimensions,
+              encoding: VideoEncoding(
+                maxBitrate: (_videoBitrate * 1000).round(),
+                maxFramerate: frameRate,
+              ),
+            ),
+          ),
+        );
+        
+        // Replace the track
+        await participant.publishVideoTrack(newTrack);
+        print('Frame rate changed to: ${frameRate} fps');
+      } catch (e) {
+        print('Failed to change frame rate: $e');
       }
     }
   }
@@ -639,6 +679,43 @@ class _ControlsWidgetState extends State<ControlsWidget> {
                     onChanged: (String? newValue) {
                       if (newValue != null) {
                         _changeResolution(newValue);
+                      }
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Frame rate selector
+              Text(
+                'Frame Rate',
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.grey),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<int>(
+                    value: _selectedFrameRate,
+                    dropdownColor: Colors.black87,
+                    style: const TextStyle(color: Colors.white),
+                    items: _frameRateOptions.map((int frameRate) {
+                      return DropdownMenuItem<int>(
+                        value: frameRate,
+                        child: Text(
+                          '${frameRate} fps',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (int? newValue) {
+                      if (newValue != null) {
+                        _changeFrameRate(newValue);
                       }
                     },
                   ),
