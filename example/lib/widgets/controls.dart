@@ -113,6 +113,16 @@ class _ControlsWidgetState extends State<ControlsWidget> {
   List<double> _cpuHistory = [];
   bool _showCPUStats = false;
   Timer? _cpuMonitorTimer;
+  
+  // Auto degradation thresholds
+  bool _showDegradationSettings = false;
+  double _networkQualityThreshold = 0.5; // Network quality threshold (0.0-1.0)
+  double _cpuUsageThreshold = 75.0; // CPU usage threshold (0-100%)
+  double _rttThreshold = 200.0; // RTT threshold in ms
+  int _packetLossThreshold = 5; // Packet loss threshold
+  bool _enableCPUBasedDegradation = true;
+  bool _enableRTTBasedDegradation = true;
+  bool _enablePacketLossBasedDegradation = true;
 
   @override
   void initState() {
@@ -680,23 +690,72 @@ class _ControlsWidgetState extends State<ControlsWidget> {
   void _adjustQualityBasedOnNetwork() {
     if (!_adaptiveStream) return;
     
-    // Auto-adjust resolution and bitrate based on network quality
-    if (_networkQuality < 0.3 && _selectedResolution != '360p') {
-      // Very poor network - drop to 360p
-      _changeResolution('360p');
-    } else if (_networkQuality < 0.5 && _selectedResolution == '1080p') {
-      // Poor network - drop from 1080p to 720p
-      _changeResolution('720p');
-    } else if (_networkQuality > 0.8 && _selectedResolution == '360p') {
-      // Excellent network - upgrade from 360p to 720p
-      _changeResolution('720p');
+    bool shouldDegrade = false;
+    String degradationReason = '';
+    
+    // Check network quality threshold
+    if (_networkQuality < _networkQualityThreshold) {
+      shouldDegrade = true;
+      degradationReason += 'Network quality (${(_networkQuality * 100).toStringAsFixed(0)}%) below threshold (${(_networkQualityThreshold * 100).toStringAsFixed(0)}%); ';
     }
     
-    // Adjust frame rate based on network quality
-    if (_networkQuality < 0.4 && _selectedFrameRate > 15) {
-      _changeFrameRate(15);
-    } else if (_networkQuality > 0.7 && _selectedFrameRate < 30) {
-      _changeFrameRate(30);
+    // Check RTT threshold
+    if (_enableRTTBasedDegradation && _rtt > _rttThreshold) {
+      shouldDegrade = true;
+      degradationReason += 'RTT (${_rtt.toStringAsFixed(0)}ms) above threshold (${_rttThreshold.toStringAsFixed(0)}ms); ';
+    }
+    
+    // Check packet loss threshold
+    if (_enablePacketLossBasedDegradation && _packetsLost > _packetLossThreshold) {
+      shouldDegrade = true;
+      degradationReason += 'Packet loss ($_packetsLost) above threshold ($_packetLossThreshold); ';
+    }
+    
+    // Check CPU usage threshold
+    if (_enableCPUBasedDegradation && _cpuUsage > _cpuUsageThreshold) {
+      shouldDegrade = true;
+      degradationReason += 'CPU usage (${_cpuUsage.toStringAsFixed(1)}%) above threshold (${_cpuUsageThreshold.toStringAsFixed(1)}%); ';
+    }
+    
+    if (shouldDegrade) {
+      print('Quality degradation triggered: $degradationReason');
+      
+      // Degrade resolution
+      if (_selectedResolution == '1440p') {
+        _changeResolution('1080p');
+      } else if (_selectedResolution == '1080p') {
+        _changeResolution('720p');
+      } else if (_selectedResolution == '720p') {
+        _changeResolution('480p');
+      } else if (_selectedResolution == '480p') {
+        _changeResolution('360p');
+      }
+      
+      // Degrade frame rate if CPU is too high
+      if (_enableCPUBasedDegradation && _cpuUsage > _cpuUsageThreshold && _selectedFrameRate > 15) {
+        if (_selectedFrameRate == 60) {
+          _changeFrameRate(30);
+        } else if (_selectedFrameRate == 30) {
+          _changeFrameRate(24);
+        } else if (_selectedFrameRate == 24) {
+          _changeFrameRate(15);
+        }
+      }
+    } else {
+      // Try to upgrade quality if conditions allow
+      if (_networkQuality > (_networkQualityThreshold + 0.2) && 
+          _rtt < (_rttThreshold - 50) && 
+          _cpuUsage < (_cpuUsageThreshold - 15)) {
+        
+        print('Conditions good - considering quality upgrade');
+        
+        // Upgrade resolution gradually
+        if (_selectedResolution == '360p') {
+          _changeResolution('480p');
+        } else if (_selectedResolution == '480p' && _cpuUsage < (_cpuUsageThreshold - 20)) {
+          _changeResolution('720p');
+        }
+      }
     }
   }
   
@@ -1039,6 +1098,11 @@ class _ControlsWidgetState extends State<ControlsWidget> {
               color: _showCPUStats ? Colors.blue : _getCPUStatusColor(),
             ),
             tooltip: 'CPU Usage: ${_cpuUsage.toStringAsFixed(1)}%',
+          ),
+          IconButton(
+            onPressed: () => setState(() => _showDegradationSettings = !_showDegradationSettings),
+            icon: Icon(Icons.auto_fix_high, color: _showDegradationSettings ? Colors.blue : null),
+            tooltip: 'Auto Quality Settings',
           ),
         ],
       ),
@@ -1679,6 +1743,228 @@ class _ControlsWidgetState extends State<ControlsWidget> {
               Text(
                 '* CPU usage estimated based on video encoding settings',
                 style: const TextStyle(color: Colors.white60, fontSize: 11, fontStyle: FontStyle.italic),
+              ),
+            ],
+          ),
+        ),
+      ],
+      // Auto degradation settings panel
+      if (_showDegradationSettings) ...[
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.auto_fix_high,
+                    color: Colors.blue,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Auto Quality Thresholds',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              
+              // Network Quality Threshold
+              Text(
+                'Network Quality Threshold: ${(_networkQualityThreshold * 100).toStringAsFixed(0)}%',
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              Slider(
+                value: _networkQualityThreshold,
+                min: 0.1,
+                max: 0.9,
+                divisions: 8,
+                activeColor: Colors.blue,
+                inactiveColor: Colors.grey,
+                onChanged: (value) {
+                  setState(() {
+                    _networkQualityThreshold = value;
+                  });
+                },
+              ),
+              const SizedBox(height: 12),
+              
+              // CPU Usage Threshold
+              Row(
+                children: [
+                  Checkbox(
+                    value: _enableCPUBasedDegradation,
+                    onChanged: (value) {
+                      setState(() {
+                        _enableCPUBasedDegradation = value ?? true;
+                      });
+                    },
+                    activeColor: Colors.blue,
+                  ),
+                  Expanded(
+                    child: Text(
+                      'CPU Threshold: ${_cpuUsageThreshold.toStringAsFixed(0)}%',
+                      style: TextStyle(
+                        color: _enableCPUBasedDegradation ? Colors.white : Colors.white54,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (_enableCPUBasedDegradation)
+                Slider(
+                  value: _cpuUsageThreshold,
+                  min: 50.0,
+                  max: 95.0,
+                  divisions: 9,
+                  activeColor: Colors.purple,
+                  inactiveColor: Colors.grey,
+                  onChanged: (value) {
+                    setState(() {
+                      _cpuUsageThreshold = value;
+                    });
+                  },
+                ),
+              const SizedBox(height: 12),
+              
+              // RTT Threshold
+              Row(
+                children: [
+                  Checkbox(
+                    value: _enableRTTBasedDegradation,
+                    onChanged: (value) {
+                      setState(() {
+                        _enableRTTBasedDegradation = value ?? true;
+                      });
+                    },
+                    activeColor: Colors.blue,
+                  ),
+                  Expanded(
+                    child: Text(
+                      'RTT Threshold: ${_rttThreshold.toStringAsFixed(0)}ms',
+                      style: TextStyle(
+                        color: _enableRTTBasedDegradation ? Colors.white : Colors.white54,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (_enableRTTBasedDegradation)
+                Slider(
+                  value: _rttThreshold,
+                  min: 50.0,
+                  max: 500.0,
+                  divisions: 18,
+                  activeColor: Colors.orange,
+                  inactiveColor: Colors.grey,
+                  onChanged: (value) {
+                    setState(() {
+                      _rttThreshold = value;
+                    });
+                  },
+                ),
+              const SizedBox(height: 12),
+              
+              // Packet Loss Threshold
+              Row(
+                children: [
+                  Checkbox(
+                    value: _enablePacketLossBasedDegradation,
+                    onChanged: (value) {
+                      setState(() {
+                        _enablePacketLossBasedDegradation = value ?? true;
+                      });
+                    },
+                    activeColor: Colors.blue,
+                  ),
+                  Expanded(
+                    child: Text(
+                      'Packet Loss Threshold: $_packetLossThreshold packets',
+                      style: TextStyle(
+                        color: _enablePacketLossBasedDegradation ? Colors.white : Colors.white54,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (_enablePacketLossBasedDegradation)
+                Slider(
+                  value: _packetLossThreshold.toDouble(),
+                  min: 1.0,
+                  max: 20.0,
+                  divisions: 19,
+                  activeColor: Colors.red,
+                  inactiveColor: Colors.grey,
+                  onChanged: (value) {
+                    setState(() {
+                      _packetLossThreshold = value.round();
+                    });
+                  },
+                ),
+              const SizedBox(height: 16),
+              
+              // Current status
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Current Status',
+                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Network: ${(_networkQuality * 100).toStringAsFixed(0)}% (threshold: ${(_networkQualityThreshold * 100).toStringAsFixed(0)}%)',
+                      style: TextStyle(
+                        color: _networkQuality >= _networkQualityThreshold ? Colors.green : Colors.red,
+                        fontSize: 12,
+                      ),
+                    ),
+                    if (_enableCPUBasedDegradation)
+                      Text(
+                        'CPU: ${_cpuUsage.toStringAsFixed(1)}% (threshold: ${_cpuUsageThreshold.toStringAsFixed(0)}%)',
+                        style: TextStyle(
+                          color: _cpuUsage <= _cpuUsageThreshold ? Colors.green : Colors.red,
+                          fontSize: 12,
+                        ),
+                      ),
+                    if (_enableRTTBasedDegradation)
+                      Text(
+                        'RTT: ${_rtt.toStringAsFixed(0)}ms (threshold: ${_rttThreshold.toStringAsFixed(0)}ms)',
+                        style: TextStyle(
+                          color: _rtt <= _rttThreshold ? Colors.green : Colors.red,
+                          fontSize: 12,
+                        ),
+                      ),
+                    if (_enablePacketLossBasedDegradation)
+                      Text(
+                        'Packet Loss: $_packetsLost (threshold: $_packetLossThreshold)',
+                        style: TextStyle(
+                          color: _packetsLost <= _packetLossThreshold ? Colors.green : Colors.red,
+                          fontSize: 12,
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ],
           ),
