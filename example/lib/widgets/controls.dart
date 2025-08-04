@@ -101,6 +101,12 @@ class _ControlsWidgetState extends State<ControlsWidget> {
   int _packetsLost = 0;
   double _rtt = 0.0; // Round trip time in ms
   bool _showNetworkStats = false;
+  
+  // Bandwidth monitoring chart
+  List<double> _bandwidthHistory = [];
+  List<double> _rttHistory = [];
+  final int _maxHistoryLength = 30; // Keep last 30 data points (1 minute at 2s intervals)
+  bool _showBandwidthChart = false;
 
   @override
   void initState() {
@@ -610,6 +616,18 @@ class _ControlsWidgetState extends State<ControlsWidget> {
             _rtt = (latestStat.roundTripTime ?? 0.0) * 1000; // Convert to ms
             _currentBandwidth = videoTrack.currentBitrate?.toDouble() ?? 0.0;
             
+            // Add to history for charts
+            _bandwidthHistory.add(_currentBandwidth);
+            _rttHistory.add(_rtt);
+            
+            // Keep history within limits
+            if (_bandwidthHistory.length > _maxHistoryLength) {
+              _bandwidthHistory.removeAt(0);
+            }
+            if (_rttHistory.length > _maxHistoryLength) {
+              _rttHistory.removeAt(0);
+            }
+            
             // Calculate network quality based on RTT and packet loss
             _networkQuality = _calculateNetworkQuality(_rtt, _packetsLost);
             _networkStatus = _getNetworkStatusString(_networkQuality);
@@ -902,6 +920,11 @@ class _ControlsWidgetState extends State<ControlsWidget> {
               color: _showNetworkStats ? Colors.blue : _getNetworkStatusColor(),
             ),
             tooltip: 'Network Status: $_networkStatus',
+          ),
+          IconButton(
+            onPressed: () => setState(() => _showBandwidthChart = !_showBandwidthChart),
+            icon: Icon(Icons.show_chart, color: _showBandwidthChart ? Colors.blue : null),
+            tooltip: 'Bandwidth Chart',
           ),
         ],
       ),
@@ -1294,8 +1317,255 @@ class _ControlsWidgetState extends State<ControlsWidget> {
           ),
         ),
       ],
+      // Bandwidth monitoring chart panel
+      if (_showBandwidthChart) ...[
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.show_chart,
+                    color: Colors.blue,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Bandwidth Monitor',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              // Bandwidth chart
+              Text(
+                'Bandwidth (last ${_bandwidthHistory.length} samples)',
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                height: 100,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                ),
+                child: _buildBandwidthChart(),
+              ),
+              const SizedBox(height: 16),
+              // RTT chart
+              Text(
+                'Round Trip Time (last ${_rttHistory.length} samples)',
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                height: 80,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                ),
+                child: _buildRTTChart(),
+              ),
+              const SizedBox(height: 16),
+              // Chart statistics
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  Column(
+                    children: [
+                      Text(
+                        'Avg Bandwidth',
+                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                      Text(
+                        _bandwidthHistory.isNotEmpty 
+                          ? '${(_bandwidthHistory.reduce((a, b) => a + b) / _bandwidthHistory.length / 1000).toStringAsFixed(1)} Mbps'
+                          : '0.0 Mbps',
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    children: [
+                      Text(
+                        'Max Bandwidth',
+                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                      Text(
+                        _bandwidthHistory.isNotEmpty 
+                          ? '${(_bandwidthHistory.reduce(math.max) / 1000).toStringAsFixed(1)} Mbps'
+                          : '0.0 Mbps',
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    children: [
+                      Text(
+                        'Avg RTT',
+                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                      Text(
+                        _rttHistory.isNotEmpty 
+                          ? '${(_rttHistory.reduce((a, b) => a + b) / _rttHistory.length).toStringAsFixed(0)} ms'
+                          : '0 ms',
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
     ],
       ),
     );
+  }
+  
+  Widget _buildBandwidthChart() {
+    if (_bandwidthHistory.isEmpty) {
+      return const Center(
+        child: Text(
+          'No data yet...',
+          style: TextStyle(color: Colors.white70, fontSize: 12),
+        ),
+      );
+    }
+    
+    return CustomPaint(
+      size: Size.infinite,
+      painter: LineChartPainter(
+        data: _bandwidthHistory,
+        color: Colors.blue,
+        label: 'kbps',
+      ),
+    );
+  }
+  
+  Widget _buildRTTChart() {
+    if (_rttHistory.isEmpty) {
+      return const Center(
+        child: Text(
+          'No data yet...',
+          style: TextStyle(color: Colors.white70, fontSize: 12),
+        ),
+      );
+    }
+    
+    return CustomPaint(
+      size: Size.infinite,
+      painter: LineChartPainter(
+        data: _rttHistory,
+        color: Colors.orange,
+        label: 'ms',
+      ),
+    );
+  }
+}
+
+class LineChartPainter extends CustomPainter {
+  final List<double> data;
+  final Color color;
+  final String label;
+  
+  LineChartPainter({
+    required this.data,
+    required this.color,
+    required this.label,
+  });
+  
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (data.isEmpty) return;
+    
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke;
+    
+    final fillPaint = Paint()
+      ..color = color.withOpacity(0.2)
+      ..style = PaintingStyle.fill;
+    
+    final path = Path();
+    final fillPath = Path();
+    
+    final maxValue = data.reduce(math.max);
+    final minValue = data.reduce(math.min);
+    final range = maxValue - minValue;
+    
+    if (range == 0) return; // Avoid division by zero
+    
+    final stepX = size.width / (data.length - 1);
+    
+    // Start fill path from bottom
+    fillPath.moveTo(0, size.height);
+    
+    for (int i = 0; i < data.length; i++) {
+      final x = i * stepX;
+      final normalizedValue = (data[i] - minValue) / range;
+      final y = size.height - (normalizedValue * size.height);
+      
+      if (i == 0) {
+        path.moveTo(x, y);
+        fillPath.lineTo(x, y);
+      } else {
+        path.lineTo(x, y);
+        fillPath.lineTo(x, y);
+      }
+    }
+    
+    // Close fill path
+    fillPath.lineTo(size.width, size.height);
+    fillPath.close();
+    
+    // Draw filled area first
+    canvas.drawPath(fillPath, fillPaint);
+    
+    // Draw line on top
+    canvas.drawPath(path, paint);
+    
+    // Draw value labels
+    final textPainter = TextPainter(
+      textAlign: TextAlign.left,
+      textDirection: TextDirection.ltr,
+    );
+    
+    // Draw min value
+    textPainter.text = TextSpan(
+      text: '${minValue.toStringAsFixed(0)}$label',
+      style: const TextStyle(color: Colors.white70, fontSize: 10),
+    );
+    textPainter.layout();
+    textPainter.paint(canvas, Offset(4, size.height - textPainter.height - 2));
+    
+    // Draw max value
+    textPainter.text = TextSpan(
+      text: '${maxValue.toStringAsFixed(0)}$label',
+      style: const TextStyle(color: Colors.white70, fontSize: 10),
+    );
+    textPainter.layout();
+    textPainter.paint(canvas, const Offset(4, 2));
+  }
+  
+  @override
+  bool shouldRepaint(LineChartPainter oldDelegate) {
+    return oldDelegate.data != data || oldDelegate.color != color;
   }
 }
