@@ -1,0 +1,58 @@
+name: 🚀 Deploy LiveKit Flutter Web to GitHub Pages
+
+on:
+  push:
+    branches: [ web-deploy ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📦 Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: 🔧 Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.x'
+        channel: 'stable'
+        
+    - name: 📱 Enable web support
+      run: flutter config --enable-web
+      
+    - name: 🔍 Get dependencies
+      run: |
+        flutter pub get
+        cd example
+        flutter pub get
+        
+    - name: 🏗️ Build web app
+      run: |
+        cd example
+        flutter build web --base-href /client-sdk-flutter/
+        
+    - name: 📄 Setup Pages
+      uses: actions/configure-pages@v4
+      
+    - name: 📤 Upload artifact
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: './example/build/web'
+        
+    - name: 🌐 Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
