@@ -41,6 +41,16 @@ class _ControlsWidgetState extends State<ControlsWidget> {
   double _videoBitrate = 1700; // Default 1.7 Mbps
   double _audioBitrate = 48; // Default 48 kbps
   bool _showBitrateControls = false;
+  
+  // Resolution control
+  String _selectedResolution = '720p';
+  final Map<String, VideoDimensions> _resolutionOptions = {
+    '360p': VideoDimensionsPresets.h360_169,
+    '480p': VideoDimensionsPresets.h480_43,
+    '720p': VideoDimensionsPresets.h720_169,
+    '1080p': VideoDimensionsPresets.h1080_169,
+    '1440p': VideoDimensionsPresets.h1440_169,
+  };
 
   @override
   void initState() {
@@ -298,6 +308,42 @@ class _ControlsWidgetState extends State<ControlsWidget> {
     // Currently LiveKit Flutter SDK doesn't support runtime bitrate changes
     // This UI will be ready for when the API is available
     print('Audio bitrate set to: ${bitrate.round()} kbps');
+  }
+
+  void _changeResolution(String resolution) async {
+    if (_selectedResolution == resolution) return;
+    
+    setState(() {
+      _selectedResolution = resolution;
+    });
+    
+    final videoTrack = participant.videoTrackPublications.firstOrNull?.track as LocalVideoTrack?;
+    if (videoTrack != null) {
+      try {
+        // Stop current track
+        await videoTrack.stop();
+        
+        // Create new track with new resolution
+        final dimensions = _resolutionOptions[resolution]!;
+        final newTrack = await LocalVideoTrack.createCameraTrack(
+          CameraCaptureOptions(
+            params: VideoParameters(
+              dimensions: dimensions,
+              encoding: VideoEncoding(
+                maxBitrate: (_videoBitrate * 1000).round(),
+                maxFramerate: 30,
+              ),
+            ),
+          ),
+        );
+        
+        // Replace the track
+        await participant.publishVideoTrack(newTrack);
+        print('Resolution changed to: $resolution (${dimensions.width}x${dimensions.height})');
+      } catch (e) {
+        print('Failed to change resolution: $e');
+      }
+    }
   }
 
   @override
@@ -559,6 +605,44 @@ class _ControlsWidgetState extends State<ControlsWidget> {
                 activeColor: Colors.green,
                 inactiveColor: Colors.grey,
                 onChanged: _updateAudioBitrate,
+              ),
+              const SizedBox(height: 16),
+              // Resolution selector
+              Text(
+                'Video Resolution',
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.grey),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedResolution,
+                    dropdownColor: Colors.black87,
+                    style: const TextStyle(color: Colors.white),
+                    items: _resolutionOptions.keys.map((String resolution) {
+                      final dimensions = _resolutionOptions[resolution]!;
+                      return DropdownMenuItem<String>(
+                        value: resolution,
+                        child: Text(
+                          '$resolution (${dimensions.width}x${dimensions.height})',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (String? newValue) {
+                      if (newValue != null) {
+                        _changeResolution(newValue);
+                      }
+                    },
+                  ),
+                ),
               ),
             ],
           ),
