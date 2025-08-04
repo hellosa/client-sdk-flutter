@@ -42,6 +42,17 @@ class _ControlsWidgetState extends State<ControlsWidget> {
   double _audioBitrate = 48; // Default 48 kbps
   bool _showBitrateControls = false;
   
+  // Audio quality presets
+  String _selectedAudioPreset = 'Music';
+  final Map<String, int> _audioPresets = {
+    'Telephone': 12, // AudioPreset.telephone
+    'Speech': 24,    // AudioPreset.speech
+    'Music': 48,     // AudioPreset.music
+    'Music Stereo': 64,  // AudioPreset.musicStereo
+    'High Quality': 96,  // AudioPreset.musicHighQuality
+    'HQ Stereo': 128,    // AudioPreset.musicHighQualityStereo
+  };
+  
   // Resolution control
   String _selectedResolution = '720p';
   final Map<String, VideoDimensions> _resolutionOptions = {
@@ -312,6 +323,35 @@ class _ControlsWidgetState extends State<ControlsWidget> {
     // Currently LiveKit Flutter SDK doesn't support runtime bitrate changes
     // This UI will be ready for when the API is available
     print('Audio bitrate set to: ${bitrate.round()} kbps');
+  }
+
+  void _changeAudioPreset(String preset) async {
+    if (_selectedAudioPreset == preset) return;
+    
+    final bitrate = _audioPresets[preset]!;
+    setState(() {
+      _selectedAudioPreset = preset;
+      _audioBitrate = bitrate.toDouble();
+    });
+    
+    final audioTrack = participant.audioTrackPublications.firstOrNull?.track as LocalAudioTrack?;
+    if (audioTrack != null) {
+      try {
+        // Stop current track
+        await audioTrack.stop();
+        
+        // Create new track with new audio settings
+        final newTrack = await LocalAudioTrack.create(
+          AudioCaptureOptions(),
+        );
+        
+        // Replace the track
+        await participant.publishAudioTrack(newTrack);
+        print('Audio preset changed to: $preset (${bitrate} kbps)');
+      } catch (e) {
+        print('Failed to change audio preset: $e');
+      }
+    }
   }
 
   void _changeResolution(String resolution) async {
@@ -631,20 +671,43 @@ class _ControlsWidgetState extends State<ControlsWidget> {
                 inactiveColor: Colors.grey,
                 onChanged: _updateVideoBitrate,
               ),
-              const SizedBox(height: 8),
-              // Audio bitrate slider  
+              const SizedBox(height: 16),
+              // Audio quality presets
               Text(
-                'Audio Bitrate: ${_audioBitrate.round()} kbps',
+                'Audio Quality: ${_selectedAudioPreset} (${_audioBitrate.round()} kbps)',
                 style: const TextStyle(color: Colors.white, fontSize: 14),
               ),
-              Slider(
-                value: _audioBitrate,
-                min: 12,
-                max: 128,
-                divisions: 29,
-                activeColor: Colors.green,
-                inactiveColor: Colors.grey,
-                onChanged: _updateAudioBitrate,
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.grey),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedAudioPreset,
+                    dropdownColor: Colors.black87,
+                    style: const TextStyle(color: Colors.white),
+                    items: _audioPresets.keys.map((String preset) {
+                      final bitrate = _audioPresets[preset]!;
+                      return DropdownMenuItem<String>(
+                        value: preset,
+                        child: Text(
+                          '$preset (${bitrate} kbps)',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (String? newValue) {
+                      if (newValue != null) {
+                        _changeAudioPreset(newValue);
+                      }
+                    },
+                  ),
+                ),
               ),
               const SizedBox(height: 16),
               // Resolution selector
