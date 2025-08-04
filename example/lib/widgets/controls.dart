@@ -123,6 +123,14 @@ class _ControlsWidgetState extends State<ControlsWidget> {
   bool _enableCPUBasedDegradation = true;
   bool _enableRTTBasedDegradation = true;
   bool _enablePacketLossBasedDegradation = true;
+  
+  // Statistics panel
+  bool _showStatisticsPanel = false;
+  DateTime _sessionStartTime = DateTime.now();
+  int _qualityChanges = 0;
+  int _networkEvents = 0;
+  double _totalDataSent = 0.0; // in MB
+  double _totalDataReceived = 0.0; // in MB
 
   @override
   void initState() {
@@ -470,6 +478,7 @@ class _ControlsWidgetState extends State<ControlsWidget> {
     
     setState(() {
       _selectedResolution = resolution;
+      _qualityChanges++; // Track quality changes
     });
     
     final videoTrack = participant.videoTrackPublications.firstOrNull?.track as LocalVideoTrack?;
@@ -646,6 +655,15 @@ class _ControlsWidgetState extends State<ControlsWidget> {
             }
             if (_rttHistory.length > _maxHistoryLength) {
               _rttHistory.removeAt(0);
+            }
+            
+            // Update data statistics (simplified estimation)
+            _totalDataSent += (_currentBandwidth / 8.0) * 2.0 / 1024.0; // Convert kbps to MB over 2 second interval
+            _totalDataReceived += (_currentBandwidth / 8.0) * 0.1 / 1024.0; // Estimate received data as 10% of sent
+            
+            // Track network events
+            if (_rtt > _rttThreshold || _packetsLost > _packetLossThreshold) {
+              _networkEvents++;
             }
             
             // Calculate network quality based on RTT and packet loss
@@ -867,6 +885,31 @@ class _ControlsWidgetState extends State<ControlsWidget> {
     if (_cpuUsage >= 60) return Colors.orange;
     if (_cpuUsage >= 40) return Colors.yellow;
     return Colors.green;
+  }
+  
+  String _getSessionDuration() {
+    final duration = DateTime.now().difference(_sessionStartTime);
+    if (duration.inHours > 0) {
+      return '${duration.inHours}h ${duration.inMinutes % 60}m ${duration.inSeconds % 60}s';
+    } else if (duration.inMinutes > 0) {
+      return '${duration.inMinutes}m ${duration.inSeconds % 60}s';
+    } else {
+      return '${duration.inSeconds}s';
+    }
+  }
+  
+  void _resetStatistics() {
+    setState(() {
+      _sessionStartTime = DateTime.now();
+      _qualityChanges = 0;
+      _networkEvents = 0;
+      _totalDataSent = 0.0;
+      _totalDataReceived = 0.0;
+      _bandwidthHistory.clear();
+      _rttHistory.clear();
+      _cpuHistory.clear();
+    });
+    print('Statistics reset');
   }
 
   @override
@@ -1103,6 +1146,11 @@ class _ControlsWidgetState extends State<ControlsWidget> {
             onPressed: () => setState(() => _showDegradationSettings = !_showDegradationSettings),
             icon: Icon(Icons.auto_fix_high, color: _showDegradationSettings ? Colors.blue : null),
             tooltip: 'Auto Quality Settings',
+          ),
+          IconButton(
+            onPressed: () => setState(() => _showStatisticsPanel = !_showStatisticsPanel),
+            icon: Icon(Icons.analytics, color: _showStatisticsPanel ? Colors.blue : null),
+            tooltip: 'Session Statistics',
           ),
         ],
       ),
@@ -1964,6 +2012,246 @@ class _ControlsWidgetState extends State<ControlsWidget> {
                         ),
                       ),
                   ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+      // Statistics panel
+      if (_showStatisticsPanel) ...[
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.analytics,
+                    color: Colors.blue,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Session Statistics',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              
+              // Session duration
+              Text(
+                'Session Duration: ${_getSessionDuration()}',
+                style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              
+              // Current settings summary
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Current Configuration',
+                      style: const TextStyle(color: Colors.blue, fontSize: 14, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Resolution:', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text(_selectedResolution, style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Frame Rate:', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text('${_selectedFrameRate} fps', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Codec:', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text(_selectedCodec, style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Audio Quality:', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text(_selectedAudioPreset, style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Simulcast:', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text(_selectedSimulcastLayers, style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Adaptive Streaming:', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text(_adaptiveStream ? 'Enabled' : 'Disabled', 
+                             style: TextStyle(
+                               color: _adaptiveStream ? Colors.green : Colors.red, 
+                               fontSize: 12
+                             )),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              // Performance statistics
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.green.withOpacity(0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Performance Statistics',
+                      style: const TextStyle(color: Colors.green, fontSize: 14, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Quality Changes:', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text('$_qualityChanges', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Network Events:', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text('$_networkEvents', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Data Sent:', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text('${_totalDataSent.toStringAsFixed(1)} MB', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Data Received:', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text('${_totalDataReceived.toStringAsFixed(1)} MB', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Avg CPU Usage:', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text(_cpuHistory.isNotEmpty 
+                             ? '${(_cpuHistory.reduce((a, b) => a + b) / _cpuHistory.length).toStringAsFixed(1)}%'
+                             : '0%', 
+                             style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Avg Bandwidth:', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text(_bandwidthHistory.isNotEmpty 
+                             ? '${(_bandwidthHistory.reduce((a, b) => a + b) / _bandwidthHistory.length / 1000).toStringAsFixed(1)} Mbps'
+                             : '0 Mbps', 
+                             style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              // Current status
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: _getNetworkStatusColor().withOpacity(0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Current Status',
+                      style: TextStyle(color: _getNetworkStatusColor(), fontSize: 14, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Network Quality:', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text(_networkStatus, style: TextStyle(color: _getNetworkStatusColor(), fontSize: 12, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Current RTT:', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text('${_rtt.toStringAsFixed(0)} ms', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Current CPU:', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text('${_cpuUsage.toStringAsFixed(1)}%', style: TextStyle(color: _getCPUStatusColor(), fontSize: 12)),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Current Bandwidth:', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text('${(_currentBandwidth / 1000).toStringAsFixed(1)} Mbps', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              
+              // Reset button
+              Center(
+                child: ElevatedButton.icon(
+                  onPressed: _resetStatistics,
+                  icon: Icon(Icons.refresh, size: 16),
+                  label: Text('Reset Statistics'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.withOpacity(0.2),
+                    foregroundColor: Colors.white,
+                    side: BorderSide(color: Colors.blue, width: 1),
+                  ),
                 ),
               ),
             ],
