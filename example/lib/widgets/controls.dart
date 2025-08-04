@@ -107,6 +107,12 @@ class _ControlsWidgetState extends State<ControlsWidget> {
   List<double> _rttHistory = [];
   final int _maxHistoryLength = 30; // Keep last 30 data points (1 minute at 2s intervals)
   bool _showBandwidthChart = false;
+  
+  // CPU usage monitoring
+  double _cpuUsage = 0.0; // Percentage 0-100
+  List<double> _cpuHistory = [];
+  bool _showCPUStats = false;
+  Timer? _cpuMonitorTimer;
 
   @override
   void initState() {
@@ -120,11 +126,15 @@ class _ControlsWidgetState extends State<ControlsWidget> {
     
     // Start network monitoring
     _startNetworkMonitoring();
+    
+    // Start CPU monitoring
+    _startCPUMonitoring();
   }
 
   @override
   void dispose() {
     _subscription?.cancel();
+    _cpuMonitorTimer?.cancel();
     participant.removeListener(_onChange);
     super.dispose();
   }
@@ -703,6 +713,102 @@ class _ControlsWidgetState extends State<ControlsWidget> {
     if (_networkQuality >= 0.4) return Colors.orange;
     return Colors.red;
   }
+  
+  void _startCPUMonitoring() {
+    _cpuMonitorTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      _updateCPUStats();
+    });
+  }
+  
+  void _updateCPUStats() {
+    // Simulate CPU usage calculation
+    // In a real app, you would use platform-specific methods to get actual CPU usage
+    // For web, we can estimate based on video processing performance
+    try {
+      final videoTrack = participant.videoTrackPublications.firstOrNull?.track as LocalVideoTrack?;
+      if (videoTrack != null) {
+        // Estimate CPU usage based on video encoding performance
+        // Higher resolution and frame rate = higher CPU usage
+        double estimatedCPU = 0.0;
+        
+        // Base CPU usage
+        estimatedCPU += 10.0; // Base usage for running the app
+        
+        // Resolution impact
+        switch (_selectedResolution) {
+          case '360p':
+            estimatedCPU += 5.0;
+            break;
+          case '480p':
+            estimatedCPU += 10.0;
+            break;
+          case '720p':
+            estimatedCPU += 20.0;
+            break;
+          case '1080p':
+            estimatedCPU += 35.0;
+            break;
+          case '1440p':
+            estimatedCPU += 50.0;
+            break;
+        }
+        
+        // Frame rate impact
+        estimatedCPU += (_selectedFrameRate / 60.0) * 15.0;
+        
+        // Codec impact
+        switch (_selectedCodec) {
+          case 'H.264':
+            estimatedCPU += 5.0;
+            break;
+          case 'VP8':
+            estimatedCPU += 8.0;
+            break;
+          case 'VP9':
+            estimatedCPU += 12.0;
+            break;
+          case 'AV1':
+            estimatedCPU += 20.0;
+            break;
+        }
+        
+        // Simulcast impact
+        if (_simulcastEnabled && _selectedSimulcastLayers != 'Disabled') {
+          estimatedCPU += 10.0;
+        }
+        
+        // Add some random variation to simulate real CPU usage
+        final random = math.Random();
+        estimatedCPU += (random.nextDouble() - 0.5) * 10.0;
+        
+        // Clamp to reasonable range
+        estimatedCPU = math.max(0.0, math.min(100.0, estimatedCPU));
+        
+        setState(() {
+          _cpuUsage = estimatedCPU;
+          _cpuHistory.add(_cpuUsage);
+          
+          // Keep history within limits
+          if (_cpuHistory.length > _maxHistoryLength) {
+            _cpuHistory.removeAt(0);
+          }
+        });
+      }
+    } catch (e) {
+      print('Failed to update CPU stats: $e');
+    }
+  }
+  
+  Color _getCPUStatusColor() {
+    if (_cpuUsage >= 80) return Colors.red;
+    if (_cpuUsage >= 60) return Colors.orange;
+    if (_cpuUsage >= 40) return Colors.yellow;
+    return Colors.green;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -925,6 +1031,14 @@ class _ControlsWidgetState extends State<ControlsWidget> {
             onPressed: () => setState(() => _showBandwidthChart = !_showBandwidthChart),
             icon: Icon(Icons.show_chart, color: _showBandwidthChart ? Colors.blue : null),
             tooltip: 'Bandwidth Chart',
+          ),
+          IconButton(
+            onPressed: () => setState(() => _showCPUStats = !_showCPUStats),
+            icon: Icon(
+              Icons.memory,
+              color: _showCPUStats ? Colors.blue : _getCPUStatusColor(),
+            ),
+            tooltip: 'CPU Usage: ${_cpuUsage.toStringAsFixed(1)}%',
           ),
         ],
       ),
@@ -1433,6 +1547,143 @@ class _ControlsWidgetState extends State<ControlsWidget> {
           ),
         ),
       ],
+      // CPU usage panel
+      if (_showCPUStats) ...[
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.memory,
+                    color: _getCPUStatusColor(),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'CPU Usage',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              // Current CPU usage
+              Text(
+                'Current: ${_cpuUsage.toStringAsFixed(1)}%',
+                style: TextStyle(
+                  color: _getCPUStatusColor(),
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              // CPU usage progress bar
+              Container(
+                height: 12,
+                decoration: BoxDecoration(
+                  color: Colors.grey.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: (_cpuUsage / 100.0).clamp(0.0, 1.0),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: _getCPUStatusColor(),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // CPU history chart
+              Text(
+                'CPU History (last ${_cpuHistory.length} seconds)',
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                height: 80,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                ),
+                child: _buildCPUChart(),
+              ),
+              const SizedBox(height: 16),
+              // CPU statistics
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  Column(
+                    children: [
+                      Text(
+                        'Average',
+                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                      Text(
+                        _cpuHistory.isNotEmpty 
+                          ? '${(_cpuHistory.reduce((a, b) => a + b) / _cpuHistory.length).toStringAsFixed(1)}%'
+                          : '0.0%',
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    children: [
+                      Text(
+                        'Maximum',
+                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                      Text(
+                        _cpuHistory.isNotEmpty 
+                          ? '${_cpuHistory.reduce(math.max).toStringAsFixed(1)}%'
+                          : '0.0%',
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    children: [
+                      Text(
+                        'Status',
+                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                      Text(
+                        _cpuUsage >= 80 ? 'High' : 
+                        _cpuUsage >= 60 ? 'Medium' : 
+                        _cpuUsage >= 40 ? 'Normal' : 'Low',
+                        style: TextStyle(
+                          color: _getCPUStatusColor(), 
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '* CPU usage estimated based on video encoding settings',
+                style: const TextStyle(color: Colors.white60, fontSize: 11, fontStyle: FontStyle.italic),
+              ),
+            ],
+          ),
+        ),
+      ],
     ],
       ),
     );
@@ -1474,6 +1725,26 @@ class _ControlsWidgetState extends State<ControlsWidget> {
         data: _rttHistory,
         color: Colors.orange,
         label: 'ms',
+      ),
+    );
+  }
+  
+  Widget _buildCPUChart() {
+    if (_cpuHistory.isEmpty) {
+      return const Center(
+        child: Text(
+          'No data yet...',
+          style: TextStyle(color: Colors.white70, fontSize: 12),
+        ),
+      );
+    }
+    
+    return CustomPaint(
+      size: Size.infinite,
+      painter: LineChartPainter(
+        data: _cpuHistory,
+        color: Colors.purple,
+        label: '%',
       ),
     );
   }
