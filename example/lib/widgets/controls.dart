@@ -36,6 +36,11 @@ class _ControlsWidgetState extends State<ControlsWidget> {
   StreamSubscription? _subscription;
 
   bool _speakerphoneOn = Hardware.instance.speakerOn ?? false;
+  
+  // Video bitrate control (in kbps)
+  double _videoBitrate = 1700; // Default 1.7 Mbps
+  double _audioBitrate = 48; // Default 48 kbps
+  bool _showBitrateControls = false;
 
   @override
   void initState() {
@@ -273,6 +278,28 @@ class _ControlsWidgetState extends State<ControlsWidget> {
     }
   }
 
+  void _updateVideoBitrate(double bitrate) async {
+    setState(() {
+      _videoBitrate = bitrate;
+    });
+    
+    // TODO: Implement runtime bitrate adjustment
+    // Currently LiveKit Flutter SDK doesn't support runtime bitrate changes
+    // This UI will be ready for when the API is available
+    print('Video bitrate set to: ${bitrate.round()} kbps');
+  }
+
+  void _updateAudioBitrate(double bitrate) async {
+    setState(() {
+      _audioBitrate = bitrate;
+    });
+    
+    // TODO: Implement runtime bitrate adjustment
+    // Currently LiveKit Flutter SDK doesn't support runtime bitrate changes
+    // This UI will be ready for when the API is available
+    print('Audio bitrate set to: ${bitrate.round()} kbps');
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -280,11 +307,15 @@ class _ControlsWidgetState extends State<ControlsWidget> {
         vertical: 15,
         horizontal: 15,
       ),
-      child: Wrap(
-        alignment: WrapAlignment.center,
-        spacing: 5,
-        runSpacing: 5,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
+          // Control buttons
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 5,
+            runSpacing: 5,
+            children: [
           IconButton(
             onPressed: _unpublishAll,
             icon: const Icon(Icons.cancel),
@@ -473,7 +504,67 @@ class _ControlsWidgetState extends State<ControlsWidget> {
             icon: const Icon(Icons.bug_report),
             tooltip: 'Simulate scenario',
           ),
+          IconButton(
+            onPressed: () => setState(() => _showBitrateControls = !_showBitrateControls),
+            icon: Icon(Icons.tune, color: _showBitrateControls ? Colors.blue : null),
+            tooltip: 'Bitrate Controls',
+          ),
         ],
+      ),
+      // Bitrate control panel
+      if (_showBitrateControls) ...[
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Bitrate Controls',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Video bitrate slider
+              Text(
+                'Video Bitrate: ${_videoBitrate.round()} kbps',
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              Slider(
+                value: _videoBitrate,
+                min: 100,
+                max: 5000,
+                divisions: 49,
+                activeColor: Colors.blue,
+                inactiveColor: Colors.grey,
+                onChanged: _updateVideoBitrate,
+              ),
+              const SizedBox(height: 8),
+              // Audio bitrate slider  
+              Text(
+                'Audio Bitrate: ${_audioBitrate.round()} kbps',
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              Slider(
+                value: _audioBitrate,
+                min: 12,
+                max: 128,
+                divisions: 29,
+                activeColor: Colors.green,
+                inactiveColor: Colors.grey,
+                onChanged: _updateAudioBitrate,
+              ),
+            ],
+          ),
+        ),
+      ],
+    ],
       ),
     );
   }
